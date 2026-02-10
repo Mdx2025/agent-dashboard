@@ -10,12 +10,15 @@ echo "📡 Railway PORT: $PORT"
 # Ensure sessions directory exists
 mkdir -p "$OPENCLAW_SESSIONS_DIR"
 
-# Crear directorios necesarios para nginx
-mkdir -p /run/nginx /var/log/nginx
+# Crear directorios necesarios para nginx con permisos correctos
+mkdir -p /run/nginx /var/log/nginx /var/cache/nginx
+chmod 777 /run/nginx /var/log/nginx /var/cache/nginx 2>/dev/null || true
 
 # Generar config de nginx con el puerto de Railway
+# Nota: en Docker Alpine, nginx debe correr como root para bind a puertos < 1024
+# Railway asigna puertos dinámicos (normalmente > 1024 pero por seguridad usamos root)
 cat > /etc/nginx/nginx.conf << EOF
-user nginx;
+user root;
 worker_processes auto;
 error_log /var/log/nginx/error.log warn;
 
@@ -115,18 +118,22 @@ fi
 
 echo "✅ Gunicorn started on unix socket"
 
-# Start nginx en background
+# Start nginx en foreground mode para Docker
 echo "🌐 Starting nginx on port $PORT..."
-nginx &
+# Usar daemon off para que nginx corra en foreground y podamos capturar logs
+nginx -g 'daemon off;' &
 NGINX_PID=$!
 
 # Give nginx time to start
-sleep 3
+sleep 2
 
 # Check if nginx started
 if ! kill -0 "$NGINX_PID" 2>/dev/null; then
     echo "❌ Nginx failed to start"
-    cat /var/log/nginx/error.log 2>/dev/null || true
+    echo "📋 Nginx error logs:"
+    cat /var/log/nginx/error.log 2>/dev/null || echo "  (no logs available)"
+    echo "📋 Últimas líneas de syslog:"
+    dmesg 2>/dev/null | tail -10 || echo "  (no dmesg available)"
     exit 1
 fi
 
