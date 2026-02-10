@@ -3,9 +3,9 @@ set -e
 
 echo "🚀 Starting Agent Dashboard..."
 
-# Puerto asignado por Railway (default 8001)
+# Puerto asignado por Railway
 PORT="${PORT:-8001}"
-echo "📡 Using PORT: $PORT"
+echo "📡 Railway PORT: $PORT"
 
 # Ensure sessions directory exists
 mkdir -p "$OPENCLAW_SESSIONS_DIR"
@@ -13,9 +13,8 @@ mkdir -p "$OPENCLAW_SESSIONS_DIR"
 # Crear directorios necesarios para nginx
 mkdir -p /run/nginx /var/log/nginx
 
-# Generar config de nginx con el puerto correcto
-export PORT
-cat > /etc/nginx/nginx.conf << 'EOF'
+# Generar config de nginx con el puerto de Railway
+cat > /etc/nginx/nginx.conf << EOF
 user nginx;
 worker_processes auto;
 error_log /var/log/nginx/error.log warn;
@@ -33,7 +32,7 @@ http {
     gzip on;
     
     server {
-        listen PORT_PLACEHOLDER;
+        listen $PORT;
         server_name localhost;
         root /var/www/html;
         index index.html;
@@ -53,29 +52,27 @@ http {
         
         # API requests van a gunicorn
         location /api {
-            proxy_pass http://localhost:8000;
+            proxy_pass http://unix:/tmp/gunicorn.sock;
             proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection 'upgrade';
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_cache_bypass $http_upgrade;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_cache_bypass \$http_upgrade;
         }
         
         # SPA fallback
         location / {
-            try_files $uri $uri/ /index.html;
+            try_files \$uri \$uri/ /index.html;
         }
     }
 }
 EOF
 
-# Reemplazar el placeholder con el puerto real
-sed -i "s/PORT_PLACEHOLDER/$PORT/g" /etc/nginx/nginx.conf
-
-echo "📝 Nginx config generated with port $PORT"
+echo "📝 Nginx config generated"
+cat /etc/nginx/nginx.conf | head -20
 
 # Function to cleanup processes on exit
 cleanup() {
@@ -95,30 +92,13 @@ trap cleanup SIGTERM SIGINT
 echo "🔍 Testing nginx configuration..."
 if ! nginx -t 2>&1; then
     echo "❌ Nginx configuration test failed"
-    cat /etc/nginx/nginx.conf
     exit 1
 fi
 
-# Start nginx in background
-echo "🌐 Starting nginx..."
-nginx &
-NGINX_PID=$!
-
-# Give nginx time to start
-sleep 2
-
-# Check if nginx started
-if ! kill -0 "$NGINX_PID" 2>/dev/null; then
-    echo "❌ Nginx failed to start"
-    exit 1
-fi
-
-echo "✅ Nginx started on port $PORT (PID: $NGINX_PID)"
-
-# Start gunicorn en background (escucha en 8000)
-echo "🐍 Starting gunicorn..."
+# Start gunicorn primero (en socket unix, no puerto)
+echo "🐍 Starting gunicorn on unix socket..."
 gunicorn main:app \
-    -b 127.0.0.1:8000 \
+    -b unix:/tmp/gunicorn.sock \
     -k uvicorn.workers.UvicornWorker \
     --workers 2 \
     --access-logfile - \
@@ -126,8 +106,32 @@ gunicorn main:app \
     &
 GUNICORN_PID=$!
 
-echo "✅ Gunicorn started on port 8000 (PID: $GUNICORN_PID)"
-echo "🎯 Dashboard available at port $PORT"
+sleep 2
+
+if ! kill -0 "$GUNICORN_PID" 2>/dev/null; then
+    echo "❌ Gunicorn failed to start"
+    exit 1
+fi
+
+echo "✅ Gunicorn started on unix socket"
+
+# Start nginx en background
+echo "🌐 Starting nginx on port $PORT..."
+nginx &
+NGINX_PID=$!
+
+# Give nginx time to start
+sleep 3
+
+# Check if nginx started
+if ! kill -0 "$NGINX_PID" 2>/dev/null; then
+    echo "❌ Nginx failed to start"
+    cat /var/log/nginx/error.log 2>/dev/null || true
+    exit 1
+fi
+
+echo "✅ Nginx started on port $PORT (PID: $NGINX_PID)"
+echo "🎯 Dashboard available!"
 
 # Wait for any process to exit
 wait -n
