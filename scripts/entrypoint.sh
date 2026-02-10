@@ -30,18 +30,27 @@ if ! nginx -t 2>&1; then
     exit 1
 fi
 
-# Start nginx in background (ahora escucha en 8001)
+# Start nginx in foreground with daemon off to capture errors
 echo "🌐 Starting nginx..."
-nginx &
+
+# Intentar iniciar nginx y capturar errores
+nginx 2>&1 &
 NGINX_PID=$!
 
 # Give nginx time to start
-sleep 2
+sleep 3
 
 # Check if nginx started
 if ! kill -0 "$NGINX_PID" 2>/dev/null; then
-    echo "❌ Nginx failed to start - checking error logs:"
+    echo "❌ Nginx failed to start - trying to get error:"
+    # Intentar iniciar nginx manualmente para ver el error
+    nginx 2>&1 || true
+    echo "---"
+    echo "Checking nginx error log:"
     cat /var/log/nginx/error.log 2>/dev/null || echo "No error logs found"
+    echo "---"
+    echo "Directory permissions:"
+    ls -la /run/nginx /var/log/nginx /var/cache/nginx 2>/dev/null || true
     exit 1
 fi
 
