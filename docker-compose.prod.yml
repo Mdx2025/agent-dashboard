@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  agent-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent-dashboard
+    ports:
+      - "80:80"
+      - "8000:8000"
+    volumes:
+      - /home/clawd/.openclaw/agents/main/sessions:/home/clawd/.openclaw/agents/main/sessions:ro
+      - /etc/letsencrypt/live/mdx.agency:/etc/letsencrypt/live/mdx.agency:ro
+      - /etc/letsencrypt/archive/mdx.agency:/etc/letsencrypt/archive/mdx.agency:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OPENCLAW_SESSIONS_DIR=/home/clawd/.openclaw/agents/main/sessions
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
