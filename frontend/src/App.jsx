@@ -141,21 +141,6 @@ function KPICard({ label, value, sub, icon, children }) {
   );
 }
 
-function Drawer({ title, onClose, children }) {
-  return (
-    <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: 480, background: COLORS.bg, borderLeft: "1px solid " + COLORS.border, zIndex: 200, display: "flex", flexDirection: "column", animation: "slideIn 0.2s ease-out" }}>
-      <style>{`@keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } } @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
-      <div style={{ padding: "16px 20px", borderBottom: "1px solid " + COLORS.border, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ fontSize: 14, fontWeight: 600, color: COLORS.textPrimary }}>{title}</h2>
-        <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.textMuted, cursor: "pointer", fontSize: 18 }}>✕</button>
-      </div>
-      <div style={{ flex: 1, overflow: "auto", padding: "20px" }}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
 function TabButton({ active, onClick, children }) {
   return (
     <button onClick={onClick} style={{ 
@@ -172,6 +157,21 @@ function TabButton({ active, onClick, children }) {
     }}>
       {children}
     </button>
+  );
+}
+
+function Drawer({ title, onClose, children }) {
+  return (
+    <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: 480, background: COLORS.bg, borderLeft: "1px solid " + COLORS.border, zIndex: 200, display: "flex", flexDirection: "column", animation: "slideIn 0.2s ease-out" }}>
+      <style>{`@keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } } @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }`}</style>
+      <div style={{ padding: "16px 20px", borderBottom: "1px solid " + COLORS.border, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h2 style={{ fontSize: 14, fontWeight: 600, color: COLORS.textPrimary }}>{title}</h2>
+        <button onClick={onClose} style={{ background: "none", border: "none", color: COLORS.textMuted, cursor: "pointer", fontSize: 18 }}>✕</button>
+      </div>
+      <div style={{ flex: 1, overflow: "auto", padding: "20px" }}>
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -438,6 +438,175 @@ export default function MDXDashboard() {
     </div>
   );
 
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case "workflows": return renderWorkflows();
+      case "tools": return renderTools();
+      case "memory": return renderMemory();
+      case "alerts": return renderAlerts();
+      case "playground": return renderPlayground();
+      default: return renderOverview();
+    }
+  };
+
   return (
-    <div style={{ fontFamily: "'JetBrains Mono', monospace", background: "radial-gradient(ellipse at 20% 0%, #0f173c 0%, " + COLORS.bg + " 60%)", color: COLORS.textPrimary, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <style>{`* { box-sizing: border-box; margin: 0; padding: 0; } input::
+    <div style={{ fontFamily: "'JetBrains Mono', monospace", background: "radial-gradient(ellipseat 20% 0%, #0f173c 0%, " + COLORS.bg + " 60%)", color: COLORS.textPrimary, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <style>{`* { box-sizing: border-box; margin: 0; padding: 0; } body { margin: 0; font-family: 'JetBrains Mono', monospace; background: ` + COLORS.bg + `; color: ` + COLORS.textPrimary + `; } input::placeholder { color: ` + COLORS.textMuted + `; } button:hover { opacity: 0.9; } tr:hover { background: rgba(255,255,255,0.02); }`}</style>
+      
+      <header style={{ padding: "16px 24px", borderBottom: "1px solid " + COLORS.border, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 32, height:  "linear-gradient(135deg, "32, background: + COLORS.accent + ", " + COLORS.cyan + ")", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>◈</div>
+          <div>
+            <h1 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>MDX Agent Operations</h1>
+            <span style={{ fontSize: 10, color: COLORS.textMuted }}>Real-time monitoring dashboard</span>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: autoRefresh ? COLORS.success : COLORS.textMuted, animation: autoRefresh ? "pulse 2s infinite" : "none" }} />
+            <span style={{ fontSize: 11, color: COLORS.textMuted }}>Auto-refresh</span>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
+            <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} style={{ accentColor: COLORS.accent, marginRight: 8 }} />
+          </label>
+          <span style={{ fontSize: 11, color: COLORS.textMuted }}>{new Date(currentTime).toLocaleTimeString()}</span>
+        </div>
+      </header>
+
+      <nav style={{ padding: "12px 24px", borderBottom: "1px solid " + COLORS.border, display: "flex", gap: 4, overflowX: "auto" }}>
+        <TabButton active={activeTab === "overview"} onClick={() => setActiveTab("overview")}>Overview</TabButton>
+        <TabButton active={activeTab === "workflows"} onClick={() => setActiveTab("workflows")}>Workflows</TabButton>
+        <TabButton active={activeTab === "tools"} onClick={() => setActiveTab("tools")}>Tools</TabButton>
+        <TabButton active={activeTab === "memory"} onClick={() => setActiveTab("memory")}>Memory</TabButton>
+        <TabButton active={activeTab === "alerts"} onClick={() => setActiveTab("alerts")}>Alerts</TabButton>
+        <TabButton active={activeTab === "playground"} onClick={() => setActiveTab("playground")}>Playground</TabButton>
+      </nav>
+
+      <main style={{ flex: 1, padding: "24px", overflowY: "auto" }}>
+        {renderTabContent()}
+      </main>
+
+      {selectedSession && (
+        <Drawer title="Session Details" onClose={() => setSelectedSession(null)}>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Session ID</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.accent }}>{selectedSession.id}</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+            <div>
+              <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Agent</div>
+              <div style={{ fontSize: 12, fontWeight: 500 }}>{selectedSession.agent}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Status</div>
+              <StatusPill status={selectedSession.status} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>User</div>
+              <div style={{ fontSize: 12, fontWeight: 500 }}>{selectedSession.user}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Model</div>
+              <div style={{ fontSize: 12, fontWeight: 500 }}>{selectedSession.model}</div>
+            </div>
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 8 }}>Activity</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              <Card style={{ padding: 12, textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>{selectedSession.messages}</div>
+                <div style={{ fontSize: 9, color: COLORS.textMuted }}>Messages</div>
+              </Card>
+              <Card style={{ padding: 12, textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>{selectedSession.tools_used}</div>
+                <div style={{ fontSize: 9, color: COLORS.textMuted }}>Tools</div>
+              </Card>
+              <Card style={{ padding: 12, textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: COLORS.cyan }}>{fmt(selectedSession.tokens24h)}</div>
+                <div style={{ fontSize: 9, color: COLORS.textMuted }}>Tokens</div>
+              </Card>
+            </div>
+          </div>
+        </Drawer>
+      )}
+
+      {selectedRun && (
+        <Drawer title="Run Details" onClose={() => setSelectedRun(null)}>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Run ID</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.accent }}>{selectedRun.id}</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            <div>
+              <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Status</div>
+              <StatusPill status={selectedRun.status} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Source</div>
+              <SourceBadge source={selectedRun.source} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Model</div>
+              <div style={{ fontSize: 11 }}>{selectedRun.model}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Duration</div>
+              <div style={{ fontSize: 11 }}>{durFmt(selectedRun.duration)}</div>
+            </div>
+          </div>
+          {selectedRun.transcript && selectedRun.transcript.length > 0 && (
+            <div>
+              <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 8 }}>Transcript</div>
+              <Card padding="12px">
+                {selectedRun.transcript.map((msg, i) => (
+                  <div key={i} style={{ marginBottom: 12 }}>
+                    <span style={{ fontSize: 9, color: msg.role === "user" ? COLORS.accent : msg.role === "system" ? COLORS.warn : COLORS.textSecondary, marginBottom: 4, display: "block", textTransform: "uppercase" }}>{msg.role}</span>
+                    <span style={{ fontSize: 11 }}>{msg.content}</span>
+                  </div>
+                ))}
+              </Card>
+            </div>
+          )}
+        </Drawer>
+      )}
+
+      {selectedAgent && (
+        <Drawer title="Agent Details" onClose={() => setSelectedAgent(null)}>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Agent Name</div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>{selectedAgent.name}</div>
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 4 }}>Model</div>
+            <div style={{ fontSize: 12, color: COLORS.cyan }}>{selectedAgent.model}</div>
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 8 }}>Capabilities</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {selectedAgent.tools.map(t => (
+                <span key={t} style={{ padding: "4px 8px", background: COLORS.accent + "20", borderRadius: 4, fontSize: 10, color: COLORS.accent }}>{t}</span>
+              ))}
+            </div>
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, color: COLORS.textMuted, marginBottom: 8 }}>Statistics</div>
+            <Card>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ fontSize: 11, color: COLORS.textMuted }}>Runs (24h)</span>
+                <span style={{ fontSize: 11, fontWeight: 600 }}>{selectedAgent.runs24h}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ fontSize: 11, color: COLORS.textMuted }}>Errors (24h)</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: selectedAgent.errors24h > 0 ? COLORS.error : COLORS.success }}>{selectedAgent.errors24h}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 11, color: COLORS.textMuted }}>Active Workflows</span>
+                <span style={{ fontSize: 11, fontWeight: 600 }}>{selectedAgent.workflows}</span>
+              </div>
+            </Card>
+          </div>
+        </Drawer>
+      )}
+    </div>
+  );
+}
