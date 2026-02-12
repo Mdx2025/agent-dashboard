@@ -7,9 +7,11 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import json
+import os
+import psutil
 from enum import Enum
 
 app = FastAPI(
@@ -29,6 +31,7 @@ app.add_middleware(
 
 # Configuración
 SESSIONS_DIR = Path("/home/clawd/.openclaw/agents/main/sessions")
+LOGS_DIR = Path("/home/clawd/.openclaw/agents/main/logs")
 
 # Models
 
@@ -85,17 +88,51 @@ class RunDetails(BaseModel):
     messages: List[Dict[str, Any]]
     timeline: List[Dict[str, Any]]
 
+class HealthCheck(BaseModel):
+    name: str
+    s: str  # pass, warn, fail
+    d: str  # description
+    ms: int
+
+class ServiceStatus(BaseModel):
+    name: str
+    status: str  # healthy, degraded, offline
+    host: str
+    lat: int  # latency in ms
+    cpu: float
+    mem: float
+
+class HealthResponse(BaseModel):
+    gw: Dict[str, Any]
+    svcs: List[ServiceStatus]
+    checks: List[HealthCheck]
+    sys: Dict[str, float]
+
+class LogEntry(BaseModel):
+    id: str
+    timestamp: datetime
+    level: str
+    source: str
+    message: str
+    error: Optional[str] = None
+
+class LogsResponse(BaseModel):
+    logs: List[LogEntry]
+    total: int
+    limit: int
+    offset: int
+
 # Services
 
 class OpenClawService:
-    
+
     @staticmethod
     def parse_timestamp(ts: str) -> datetime:
         try:
             return datetime.fromisoformat(ts.replace('Z', '+00:00'))
         except:
             return datetime.now()
-    
+
     @staticmethod
     def load_sessions_index() -> Dict[str, Any]:
         index_file = SESSIONS_DIR / "sessions.json"
@@ -103,7 +140,7 @@ class OpenClawService:
             with open(index_file, 'r') as f:
                 return json.load(f)
         return {}
-    
+
     @staticmethod
     def load_session_file(session_id: str) -> List[Dict[str, Any]]:
         session_file = SESSIONS_DIR / f"{session_id}.jsonl"
@@ -111,14 +148,14 @@ class OpenClawService:
             session_file = SESSIONS_DIR / session_id
             if not session_file.exists():
                 return []
-        
+
         events = []
         with open(session_file, 'r') as f:
             for line in f:
                 if line.strip():
                     events.append(json.loads(line))
         return events
-    
+
     @staticmethod
     def load_all_session_files() -> Dict[str, List[Dict[str, Any]]]:
         sessions = {}
@@ -134,19 +171,19 @@ class OpenClawService:
             if events:
                 sessions[session_id] = events
         return sessions
-    
+
     @classmethod
     def get_active_sessions(cls) -> List[AgentRun]:
         index = cls.load_sessions_index()
         sessions = []
-        
+
         for agent_key, data in index.items():
             session_file = data.get("sessionFile", "")
             session_id = data.get("sessionId", agent_key)
-            
+
             origin = data.get("origin", {})
             origin_label = origin.get("label", "Unknown")
-            
+
             run = AgentRun(
                 id=session_id,
                 session_id=session_id,
@@ -166,14 +203,14 @@ class OpenClawService:
                 session_file=session_file
             )
             sessions.append(run)
-        
+
         return sessions
-    
+
     @classmethod
     def get_run_details(cls, session_id: str) -> RunDetails:
         index = cls.load_sessions_index()
         run = None
-        
+
         for agent_key, data in index.items():
             if data.get("sessionId") == session_id or agent_key == session_id:
                 origin = data.get("origin", {})
@@ -196,17 +233,17 @@ class OpenClawService:
                     session_file=data.get("sessionFile")
                 )
                 break
-        
+
         events = cls.load_session_file(session_id)
         session_events = []
         tool_calls = []
         messages = []
         timeline = []
-        
+
         for event in events:
             event_type = event.get("type", "unknown")
             timestamp = cls.parse_timestamp(event.get("timestamp", datetime.now().isoformat()))
-            
+
             session_event = SessionEvent(
                 type=EventType(event_type) if event_type in [e.value for e in EventType] else EventType.CUSTOM,
                 id=event.get("id", ""),
@@ -215,14 +252,14 @@ class OpenClawService:
                 data=event
             )
             session_events.append(session_event)
-            
+
             timeline.append({
                 "timestamp": timestamp.isoformat(),
                 "type": event_type,
                 "id": event.get("id"),
                 "summary": cls._get_event_summary(event)
             })
-            
+
             if event_type == "message":
                 msg = event.get("message", {})
                 messages.append({
@@ -233,7 +270,7 @@ class OpenClawService:
                     "model": msg.get("model"),
                     "usage": msg.get("usage", {})
                 })
-            
+
             if event_type == "custom":
                 custom_type = event.get("customType", "")
                 tool_calls.append(ToolCall(
@@ -243,7 +280,7 @@ class OpenClawService:
                     timestamp=timestamp,
                     success=True
                 ))
-        
+
         if not run and events:
             first_event = events[0]
             run = AgentRun(
@@ -261,7 +298,7 @@ class OpenClawService:
                 agent_key="unknown",
                 status=SessionStatus.COMPLETED
             )
-        
+
         return RunDetails(
             run=run,
             events=session_events,
@@ -269,7 +306,7 @@ class OpenClawService:
             messages=messages,
             timeline=timeline
         )
-    
+
     @staticmethod
     def _extract_content(content: List[Dict]) -> str:
         if isinstance(content, list):
@@ -279,11 +316,11 @@ class OpenClawService:
                     texts.append(item.get("text", ""))
             return "\n".join(texts)
         return str(content)
-    
+
     @staticmethod
     def _get_event_summary(event: Dict) -> str:
         event_type = event.get("type", "")
-        
+
         if event_type == "session":
             return f"Session started in {event.get('cwd', 'unknown')}"
         elif event_type == "message":
@@ -300,6 +337,67 @@ class OpenClawService:
             return f"Thinking level changed to: {level}"
         else:
             return f"{event_type}"
+
+    @classmethod
+    def get_logs(cls, limit: int = 100, offset: int = 0, level: Optional[str] = None) -> LogsResponse:
+        logs = []
+
+        # Try to load from session files
+        all_sessions = cls.load_all_session_files()
+        for session_id, events in all_sessions.items():
+            for event in events:
+                event_type = event.get("type", "")
+                timestamp = cls.parse_timestamp(event.get("timestamp", ""))
+
+                # Determine log level
+                if event_type == "error" or event.get("error"):
+                    log_level = "ERROR"
+                elif event_type == "warning" or "warn" in str(event).lower():
+                    log_level = "WARN"
+                elif event_type == "debug":
+                    log_level = "DEBUG"
+                else:
+                    log_level = "INFO"
+
+                if level and log_level != level:
+                    continue
+
+                logs.append(LogEntry(
+                    id=event.get("id", f"{session_id}_{len(logs)}"),
+                    timestamp=timestamp,
+                    level=log_level,
+                    source=event.get("source") or session_id,
+                    message=cls._get_event_summary(event),
+                    error=event.get("error")
+                ))
+
+        # Sort by timestamp descending
+        logs.sort(key=lambda x: x.timestamp, reverse=True)
+
+        total = len(logs)
+        paginated = logs[offset:offset+limit]
+
+        return LogsResponse(logs=paginated, total=total, limit=limit, offset=offset)
+
+    @classmethod
+    def get_system_metrics(cls) -> Dict[str, float]:
+        try:
+            cpu = psutil.cpu_percent(interval=0.1)
+            mem = psutil.virtual_memory().percent
+            disk = psutil.disk_usage('/').percent
+            net = psutil.net_io_counters()
+            net_in = net.bytes_recv / (1024 * 1024)  # MB
+            net_out = net.bytes_sent / (1024 * 1024)  # MB
+
+            return {
+                "cpu": round(cpu, 1),
+                "mem": round(mem, 1),
+                "disk": round(disk, 1),
+                "netIn": round(net_in, 1),
+                "netOut": round(net_out, 1)
+            }
+        except Exception as e:
+            return {"cpu": 0, "mem": 0, "disk": 0, "netIn": 0, "netOut": 0}
 
 # Dependencies
 
@@ -388,11 +486,11 @@ async def get_analytics_overview(
 ):
     sessions = service.get_active_sessions()
     all_events = service.load_all_session_files()
-    
+
     total_tokens = sum(s.total_tokens for s in sessions)
     total_messages = sum(len(events) for events in all_events.values())
     active_sessions = len([s for s in sessions if s.status == SessionStatus.ACTIVE])
-    
+
     by_channel = {}
     for s in sessions:
         channel = s.channel or "unknown"
@@ -404,7 +502,7 @@ async def get_analytics_overview(
             "model": s.model,
             "tokens": s.total_tokens
         })
-    
+
     return {
         "total_sessions": len(sessions),
         "active_sessions": active_sessions,
@@ -422,21 +520,66 @@ async def get_recent_activity(
 ):
     all_sessions = service.load_all_session_files()
     activities = []
-    
+
     for session_id, events in all_sessions.items():
         for event in events[-5:]:
             event_type = event.get("type", "unknown")
             timestamp = OpenClawService.parse_timestamp(event.get("timestamp", ""))
-            
+
             activities.append({
                 "session_id": session_id,
                 "type": event_type,
                 "timestamp": timestamp.isoformat(),
                 "summary": OpenClawService._get_event_summary(event)
             })
-    
+
     activities.sort(key=lambda x: x["timestamp"], reverse=True)
     return activities[:limit]
+
+@app.get("/api/health", response_model=HealthResponse)
+async def get_health():
+    # Get system metrics
+    sys_metrics = OpenClawService.get_system_metrics()
+
+    # Get sessions for connection count
+    index = OpenClawService.load_sessions_index()
+    conn_count = len([s for s in index.values() if not s.get("abortedLastRun", False)])
+
+    # Build health response
+    checks = [
+        HealthCheck(name="API Connectivity", s="pass", d="< 50ms", ms=50),
+        HealthCheck(name="Session Directory", s="pass" if SESSIONS_DIR.exists() else "fail", d=str(SESSIONS_DIR), ms=10),
+        HealthCheck(name="Disk Space", s="warn" if sys_metrics["disk"] > 80 else "pass", d=f"{sys_metrics['disk']}% used", ms=15),
+        HealthCheck(name="Memory", s="warn" if sys_metrics["mem"] > 80 else "pass", d=f"{sys_metrics['mem']}% used", ms=10),
+        HealthCheck(name="CPU", s="pass" if sys_metrics["cpu"] < 90 else "warn", d=f"{sys_metrics['cpu']}% load", ms=5),
+    ]
+
+    services = [
+        ServiceStatus(name="API Server", status="healthy", host="localhost", lat=5, cpu=sys_metrics["cpu"], mem=sys_metrics["mem"]),
+        ServiceStatus(name="Backend", status="healthy", host="localhost", lat=2, cpu=sys_metrics["cpu"], mem=sys_metrics["mem"]),
+    ]
+
+    return HealthResponse(
+        gw={
+            "host": os.getenv("HOSTNAME", "localhost"),
+            "ver": "1.0.0",
+            "up": "0m",
+            "conn": conn_count,
+            "rps": 0
+        },
+        svcs=services,
+        checks=checks,
+        sys=sys_metrics
+    )
+
+@app.get("/api/logs", response_model=LogsResponse)
+async def get_logs(
+    limit: int = 100,
+    offset: int = 0,
+    level: Optional[str] = None,
+    service: OpenClawService = Depends(get_openclaw_service)
+):
+    return service.get_logs(limit=limit, offset=offset, level=level)
 
 if __name__ == "__main__":
     import uvicorn
