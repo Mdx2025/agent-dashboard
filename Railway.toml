@@ -5,8 +5,8 @@
 builder = "NIXPACKS"
 
 [deploy]
-# Build the project and then serve the static files from the 'dist' directory
-startCommand = "npm run build && npx serve -s dist -l $PORT"
+# Build the project and then serve the static files using vite preview
+startCommand = "npm run build && npm run preview -- --host 0.0.0.0 --port $PORT"
 healthcheckPath = "/"
 healthcheckTimeout = 100
 
