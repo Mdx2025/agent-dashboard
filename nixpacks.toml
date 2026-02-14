@@ -1,8 +1,0 @@
-[phases.build]
-cmds = ["npm run build"]
-
-[phases.start]
-cmds = ["node server.js"]
-
-[start]
-cmd = "node server.js"
